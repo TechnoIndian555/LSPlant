@@ -1,4 +1,5 @@
-name: Build
+
+name: Build and Test
 
 on:
   push:
@@ -7,7 +8,6 @@ on:
       - 'README.md'
   workflow_dispatch:
   pull_request:
-
 
 jobs:
   build:
@@ -25,25 +25,31 @@ jobs:
           submodules: 'recursive'
           ssh-key: ${{ secrets.SSH_KEY }}
           fetch-depth: 0
+          
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
           cache: 'gradle'
+          
       - uses: seanmiddleditch/gha-setup-ninja@master
         with:
           version: 1.12.1
+          
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1
         with:
           key: ${{ runner.os }}-${{ github.sha }}
           restore-keys: ${{ runner.os }}
+          
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        
       - name: Remove Android's cmake
         shell: bash
         run: rm -rf $ANDROID_HOME/cmake
+        
       - name: Build with Gradle
         run: |
           ccache -o cache_dir=${{ github.workspace }}/.ccache
@@ -56,6 +62,7 @@ jobs:
         env:
           ORG_GRADLE_PROJECT_signingKey: ${{ secrets.maven_pgp_signingKey }}
           ORG_GRADLE_PROJECT_signingPassword: ${{ secrets.maven_pgp_signingPassword }}
+          
       - name: Upload library
         uses: actions/upload-artifact@v4
         with:
@@ -63,10 +70,79 @@ jobs:
           path: ~/.m2
           include-hidden-files: true
 
-  test:
+  build-test-apk:
+    name: Build Test APK (All Variants)
+    runs-on: ubuntu-latest
     needs: build
+    strategy:
+      matrix:
+        variant: [debug, release]
+        
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+          ssh-key: ${{ secrets.SSH_KEY }}
+          
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'gradle'
+          
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        
+      - name: Download built library artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ubuntu-latest-library
+          path: ~/.m2
+          
+      - name: Remove Android's cmake
+        shell: bash
+        run: rm -rf $ANDROID_HOME/cmake
+          
+      - name: Build Test APKs
+        run: |
+          echo 'android.native.buildOutput=verbose' >> gradle.properties
+          
+          # Main test app APK build karein
+          ./gradlew :test:assemble${{ matrix.variant^ }}
+          
+          # Instrumentation test APK build karein
+          ./gradlew :test:assemble${{ matrix.variant^ }}AndroidTest
+          
+          # APK files list karein
+          echo "=== Generated APK Files ==="
+          find test/build/outputs -name "*.apk" -type f
+          
+      - name: Upload Test APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-apk-${{ matrix.variant }}
+          path: |
+            test/build/outputs/apk/${{ matrix.variant }}/*.apk
+            test/build/outputs/apk/androidTest/${{ matrix.variant }}/*.apk
+          if-no-files-found: error
+          
+      - name: Show APK Info
+        run: |
+          echo "=== APK Information ==="
+          for apk in test/build/outputs/apk/${{ matrix.variant }}/*.apk; do
+            if [ -f "$apk" ]; then
+              echo "APK: $apk"
+              echo "Size: $(ls -lh "$apk" | awk '{print $5}')"
+              echo "---"
+            fi
+          done
+
+  test:
     name: Test on API ${{ matrix.api-level }} ${{ matrix.arch }}
     runs-on: ubuntu-latest
+    needs: [build, build-test-apk]
     strategy:
       fail-fast: false
       matrix:
@@ -158,27 +234,38 @@ jobs:
           - api-level: 36
             target: google_apis
             arch: x86_64
+            
     steps:
       - name: checkout
         uses: actions/checkout@v4
         with:
           submodules: 'recursive'
           ssh-key: ${{ secrets.SSH_KEY }}
+          
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
           cache: 'gradle'
+          
       - uses: seanmiddleditch/gha-setup-ninja@master
         with:
           version: 1.12.1
+          
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1
         with:
           key: ${{ runner.os }}-${{ github.sha }}
           restore-keys: ${{ runner.os }}
           save: false
+          
+      - name: Download built library
+        uses: actions/download-artifact@v4
+        with:
+          name: ubuntu-latest-library
+          path: ~/.m2
+          
       - name: Enable KVM group perms
         run: |
             echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -199,7 +286,8 @@ jobs:
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           avd-name: ${{ matrix.api-level }}_${{ matrix.arch }}
-      - name: Upload outputs
+          
+      - name: Upload test outputs
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -226,18 +314,21 @@ jobs:
         with:
           submodules: 'recursive'
           ssh-key: ${{ secrets.SSH_KEY }}
+          
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
           cache: 'gradle'
+          
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1
         with:
           key: ${{ runner.os }}-${{ github.sha }}
           restore-keys: ${{ runner.os }}
           save: false
+          
       - name: Setup Cuttlefish environment
         run: |
           .github/cuttlefish.sh setup
@@ -249,9 +340,17 @@ jobs:
           ccache -o cache_dir=${{ github.workspace }}/.ccache
           ccache -o hash_dir=false
           ccache -o compiler_check='%compiler% -dumpmachine; %compiler% -dumpversion'
+          
+      - name: Download built library
+        uses: actions/download-artifact@v4
+        with:
+          name: ubuntu-latest-library
+          path: ~/.m2
+          
       - name: Run Cuttlefish test
         timeout-minutes: 10
         run: su $USER -c '.github/cuttlefish.sh test'
+        
       - name: Upload logs on error
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
@@ -260,3 +359,28 @@ jobs:
           path: |
             /home/runner/aosp_cf_phone/cuttlefish/instances/cvd-1/logs
             /home/runner/aosp_cf_phone/cuttlefish/instances/cvd-1/cuttlefish_config.json
+
+  summary:
+    name: Build Summary
+    runs-on: ubuntu-latest
+    needs: [build, build-test-apk, test, cf-test]
+    if: always()
+    
+    steps:
+      - name: Download Test APKs
+        uses: actions/download-artifact@v4
+        with:
+          path: downloaded-artifacts
+          
+      - name: Generate Summary
+        run: |
+          echo "=== LSPlant Build and Test Summary ==="
+          echo "Build Status: ${{ needs.build.result }}"
+          echo "Test APK Build Status: ${{ needs.build-test-apk.result }}"
+          echo "Emulator Tests Status: ${{ needs.test.result }}"
+          echo "Cuttlefish Tests Status: ${{ needs.cf-test.result }}"
+          echo ""
+          echo "=== Generated Artifacts ==="
+          find downloaded-artifacts -name "*.apk" -type f | while read apk; do
+            echo "📱 $(basename "$apk") - $(ls -lh "$apk" | awk '{print $5}')"
+          done
