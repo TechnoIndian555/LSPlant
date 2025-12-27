@@ -1,5 +1,4 @@
-
-name: Build
+name: Build and Test
 
 on:
   push:
@@ -74,10 +73,7 @@ jobs:
     name: Build Test APK (All Variants)
     runs-on: ubuntu-latest
     needs: build
-    strategy:
-      matrix:
-        variant: [debug, release]
-        
+    
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -105,39 +101,44 @@ jobs:
         shell: bash
         run: rm -rf $ANDROID_HOME/cmake
           
-      - name: Build Test APKs
+      - name: Build Test APKs (Debug)
         run: |
           echo 'android.native.buildOutput=verbose' >> gradle.properties
           
-          # Main test app APK build karein
-          ./gradlew :test:assemble${{ matrix.variant^ }}
+          # Debug variant APKs build karein
+          ./gradlew :test:assembleDebug
+          ./gradlew :test:assembleDebugAndroidTest
           
-          # Instrumentation test APK build karein
-          ./gradlew :test:assemble${{ matrix.variant^ }}AndroidTest
+      - name: Build Test APKs (Release)
+        run: |
+          # Release variant APKs build karein
+          ./gradlew :test:assembleRelease
+          ./gradlew :test:assembleReleaseAndroidTest
           
-          # APK files list karein
+      - name: Show APK Files
+        run: |
           echo "=== Generated APK Files ==="
-          find test/build/outputs -name "*.apk" -type f
+          find test/build/outputs -name "*.apk" -type f | while read apk; do
+            echo "📱 $apk - $(ls -lh "$apk" | awk '{print $5}')"
+          done
           
-      - name: Upload Test APKs
+      - name: Upload Debug Test APKs
         uses: actions/upload-artifact@v4
         with:
-          name: test-apk-${{ matrix.variant }}
+          name: test-apk-debug
           path: |
-            test/build/outputs/apk/${{ matrix.variant }}/*.apk
-            test/build/outputs/apk/androidTest/${{ matrix.variant }}/*.apk
+            test/build/outputs/apk/debug/*.apk
+            test/build/outputs/apk/androidTest/debug/*.apk
           if-no-files-found: error
           
-      - name: Show APK Info
-        run: |
-          echo "=== APK Information ==="
-          for apk in test/build/outputs/apk/${{ matrix.variant }}/*.apk; do
-            if [ -f "$apk" ]; then
-              echo "APK: $apk"
-              echo "Size: $(ls -lh "$apk" | awk '{print $5}')"
-              echo "---"
-            fi
-          done
+      - name: Upload Release Test APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-apk-release
+          path: |
+            test/build/outputs/apk/release/*.apk
+            test/build/outputs/apk/androidTest/release/*.apk
+          if-no-files-found: warn
 
   test:
     name: Test on API ${{ matrix.api-level }} ${{ matrix.arch }}
@@ -271,6 +272,7 @@ jobs:
             echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
             sudo udevadm control --reload-rules
             sudo udevadm trigger --name-match=kvm
+            
       - name: run tests
         uses: reactivecircus/android-emulator-runner@b683a061eaff4aac4d0b585bfd0cf714a40aee93
         with:
@@ -367,11 +369,6 @@ jobs:
     if: always()
     
     steps:
-      - name: Download Test APKs
-        uses: actions/download-artifact@v4
-        with:
-          path: downloaded-artifacts
-          
       - name: Generate Summary
         run: |
           echo "=== LSPlant Build and Test Summary ==="
@@ -380,7 +377,4 @@ jobs:
           echo "Emulator Tests Status: ${{ needs.test.result }}"
           echo "Cuttlefish Tests Status: ${{ needs.cf-test.result }}"
           echo ""
-          echo "=== Generated Artifacts ==="
-          find downloaded-artifacts -name "*.apk" -type f | while read apk; do
-            echo "📱 $(basename "$apk") - $(ls -lh "$apk" | awk '{print $5}')"
-          done
+          echo "=== All Jobs Completed ==="
