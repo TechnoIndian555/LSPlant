@@ -24,39 +24,55 @@ jobs:
           java-version: '21'
           cache: 'gradle'
           
+      - name: Setup Android SDK and accept licenses
+        uses: android-actions/setup-android@v3
+        
+      - name: Accept NDK license
+        run: |
+          echo "Accepting NDK license..."
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;29.0.13599879" --licenses || true
+          
+      - name: Accept all Android licenses
+        run: |
+          echo "Accepting all Android licenses..."
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          
       - name: List available projects
         run: |
           echo "=== Listing all Gradle projects ==="
-          ./gradlew projects
+          ./gradlew projects --no-daemon
           
       - name: List available tasks
         run: |
           echo "=== Listing all assemble tasks ==="
-          ./gradlew tasks --all | grep assemble || true
+          ./gradlew tasks --all | grep -i assemble || true
           
       - name: Check project structure
         run: |
           echo "=== Project structure ==="
           find . -name "build.gradle" -o -name "build.gradle.kts" | sort
           echo ""
-          echo "=== Settings.gradle ==="
+          echo "=== Settings.gradle content ==="
           cat settings.gradle 2>/dev/null || cat settings.gradle.kts 2>/dev/null || echo "No settings file found"
           
-      - name: Build APK (try lsplant)
+      - name: Try building APK
         run: |
-          echo "Trying to build lsplant APK..."
-          ./gradlew :lsplant:assembleRelease
+          echo "Trying to build APK..."
           
-      - name: Find APKs
-        run: |
-          echo "=== Looking for APK files ==="
-          find . -name "*.apk" -type f 2>/dev/null || echo "No APK files found"
+          # Pehle lsplant build karein
+          ./gradlew :lsplant:assembleRelease --no-daemon || echo "lsplant:assembleRelease failed"
           
-      - name: Upload any APK found
-        if: success()
+          # Ab dekhte hain kya kya build hua
+          echo ""
+          echo "=== All built files ==="
+          find . -name "*.apk" -o -name "*.aar" -type f 2>/dev/null || echo "No APK/AAR files found"
+          
+      - name: Upload any built files
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: apk-files
+          name: built-artifacts
           path: |
             **/*.apk
+            **/*.aar
           if-no-files-found: warn
