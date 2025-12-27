@@ -1,5 +1,5 @@
 
-name: Build ARM Release Libraries
+name: Build Test APK
 
 on:
   push:
@@ -7,8 +7,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-arm-release:
-    name: Build ARM64 & ARM7 Release
+  build-test-apk:
+    name: Build Test APK
     runs-on: ubuntu-latest
     
     steps:
@@ -30,62 +30,41 @@ jobs:
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
           
-      - name: Clean previous builds
+      - name: List projects
         run: |
-          rm -rf lsplant/build
+          echo "=== Available projects ==="
+          ./gradlew projects --no-daemon
           
-      - name: Build ARM64 Release
+      - name: Build LSPlant library first
         run: |
-          echo "Building ARM64 Release library..."
-          ./gradlew :lsplant:assembleArm64-v8aRelease
+          echo "Building LSPlant library..."
+          ./gradlew :lsplant:assembleRelease
           
-      - name: Build ARM7 Release
+      - name: Build Test APK
         run: |
-          echo "Building ARM7 Release library..."
-          ./gradlew :lsplant:assembleArmeabi-v7aRelease
+          echo "Building test module APK..."
+          ./gradlew :test:assembleRelease
           
-      - name: Show build outputs
+      - name: Show all outputs
         run: |
-          echo "=== Release Build Outputs ==="
+          echo "=== All generated files ==="
           echo ""
-          echo "ARM64 Release files:"
-          find lsplant/build -path "*arm64-v8aRelease*" -name "*.so" -type f 2>/dev/null | while read file; do
-            echo "  - $(basename "$file") ($(ls -lh "$file" | awk '{print $5}'))"
-          done || echo "  No ARM64 files found"
-          
-          echo ""
-          echo "ARM7 Release files:"
-          find lsplant/build -path "*armeabi-v7aRelease*" -name "*.so" -type f 2>/dev/null | while read file; do
-            echo "  - $(basename "$file") ($(ls -lh "$file" | awk '{print $5}'))"
-          done || echo "  No ARM7 files found"
-          
-          echo ""
-          echo "AAR files:"
+          echo "LSPlant AAR:"
           find lsplant/build -name "*.aar" -type f 2>/dev/null | while read file; do
             echo "  - $(basename "$file") ($(ls -lh "$file" | awk '{print $5}'))"
-          done || echo "  No AAR files found"
+          done || echo "  No AAR found"
           
-      - name: Upload ARM64 Release libraries
+          echo ""
+          echo "Test APK:"
+          find test/build/outputs -name "*.apk" -type f 2>/dev/null | while read file; do
+            echo "  - $(basename "$file") ($(ls -lh "$file" | awk '{print $5}'))"
+          done || echo "  No APK found"
+          
+      - name: Upload Test APK
         uses: actions/upload-artifact@v4
         with:
-          name: arm64-release
+          name: test-release-apk
           path: |
-            lsplant/build/intermediates/cmake/arm64-v8aRelease/obj/
-            lsplant/build/intermediates/stripped_native_libs/arm64-v8aRelease/out/lib/
-          if-no-files-found: warn
-          
-      - name: Upload ARM7 Release libraries
-        uses: actions/upload-artifact@v4
-        with:
-          name: arm7-release
-          path: |
-            lsplant/build/intermediates/cmake/armeabi-v7aRelease/obj/
-            lsplant/build/intermediates/stripped_native_libs/armeabi-v7aRelease/out/lib/
-          if-no-files-found: warn
-          
-      - name: Upload Release AAR
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-aar
-          path: lsplant/build/outputs/aar/
-          if-no-files-found: ignore
+            test/build/outputs/apk/release/
+            lsplant/build/outputs/aar/
+          if-no-files-found: error
