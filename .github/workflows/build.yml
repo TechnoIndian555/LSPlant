@@ -1,3 +1,4 @@
+
 name: Build APK Only
 
 on:
@@ -16,27 +17,46 @@ jobs:
         with:
           submodules: 'recursive'
           
-      - name: Setup Java
+      - name: Setup Java with cache
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
+          cache: 'gradle'
           
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-          
-      - name: Build APK
+      - name: List available projects
         run: |
-          echo "Building APK..."
-          ./gradlew :test:assembleRelease
+          echo "=== Listing all Gradle projects ==="
+          ./gradlew projects
           
-      - name: Show APK info
+      - name: List available tasks
         run: |
-          echo "=== APK File ==="
-          ls -lh test/build/outputs/apk/release/*.apk 2>/dev/null || echo "APK not found!"
+          echo "=== Listing all assemble tasks ==="
+          ./gradlew tasks --all | grep assemble || true
           
-      - name: Upload APK
+      - name: Check project structure
+        run: |
+          echo "=== Project structure ==="
+          find . -name "build.gradle" -o -name "build.gradle.kts" | sort
+          echo ""
+          echo "=== Settings.gradle ==="
+          cat settings.gradle 2>/dev/null || cat settings.gradle.kts 2>/dev/null || echo "No settings file found"
+          
+      - name: Build APK (try lsplant)
+        run: |
+          echo "Trying to build lsplant APK..."
+          ./gradlew :lsplant:assembleRelease
+          
+      - name: Find APKs
+        run: |
+          echo "=== Looking for APK files ==="
+          find . -name "*.apk" -type f 2>/dev/null || echo "No APK files found"
+          
+      - name: Upload any APK found
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: release-apk
-          path: test/build/outputs/apk/release/
+          name: apk-files
+          path: |
+            **/*.apk
+          if-no-files-found: warn
