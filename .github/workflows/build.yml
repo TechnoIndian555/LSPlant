@@ -1,75 +1,14 @@
-
-name: Build and Test Linux
+name: Build APK Only
 
 on:
   push:
     branches: ["master"]
-    paths-ignore:
-      - 'README.md'
   workflow_dispatch:
-  pull_request:
 
 jobs:
-  build:
-    name: Build LSPlant
+  build-apk:
+    name: Build APK
     runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
-          fetch-depth: 0
-          
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '21'
-          cache: 'gradle'
-          
-      - name: Setup build tools
-        uses: seanmiddleditch/gha-setup-ninja@master
-        with:
-          version: 1.12.1
-          
-      - name: Setup ccache
-        uses: hendrikmuhs/ccache-action@v1
-        with:
-          key: linux-build-${{ github.sha }}
-          restore-keys: linux-build-
-          
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-        
-      - name: Clean Android tools
-        run: rm -rf $ANDROID_HOME/cmake
-        
-      - name: Configure environment
-        run: |
-          ccache -o cache_dir=${{ github.workspace }}/.ccache
-          ccache -o hash_dir=false
-          ccache -o compiler_check='%compiler% -dumpmachine; %compiler% -dumpversion'
-          echo 'android.native.buildOutput=verbose' >> gradle.properties
-          
-      - name: Build library
-        run: |
-          # Sirf library build karein, Maven publish nahi
-          ./gradlew :lsplant:assemble :lsplant:prefabDebugPackage
-          
-      - name: Upload build outputs
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-outputs
-          path: |
-            lsplant/build/outputs/
-            lsplant/build/intermediates/
-          retention-days: 7
-
-  build-test-apk:
-    name: Build Test Application
-    runs-on: ubuntu-latest
-    needs: build
     
     steps:
       - name: Checkout code
@@ -82,93 +21,22 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '21'
-          cache: 'gradle'
           
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
-        
-      - name: Clean Android tools
-        run: rm -rf $ANDROID_HOME/cmake
           
-      - name: Build Test APK
+      - name: Build APK
         run: |
-          echo 'Building Test APK...'
-          ./gradlew :test:assembleDebug
-          
-      - name: Build Test Instrumentation APK
-        run: |
-          ./gradlew :test:assembleDebugAndroidTest
+          echo "Building APK..."
+          ./gradlew :test:assembleRelease
           
       - name: Show APK info
         run: |
-          echo "=== Built APK Files ==="
-          if [ -d "test/build/outputs/apk/debug" ]; then
-            echo "Main APK:"
-            ls -la test/build/outputs/apk/debug/*.apk 2>/dev/null || echo "No main APK found"
-          fi
+          echo "=== APK File ==="
+          ls -lh test/build/outputs/apk/release/*.apk 2>/dev/null || echo "APK not found!"
           
-          if [ -d "test/build/outputs/apk/androidTest/debug" ]; then
-            echo -e "\nTest APK:"
-            ls -la test/build/outputs/apk/androidTest/debug/*.apk 2>/dev/null || echo "No test APK found"
-          fi
-          
-      - name: Upload APKs
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: test-apks
-          path: |
-            test/build/outputs/apk/debug/
-            test/build/outputs/apk/androidTest/debug/
-          retention-days: 7
-
-  run-tests:
-    name: Run Tests
-    runs-on: ubuntu-latest
-    needs: [build, build-test-apk]
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
-          
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '21'
-          cache: 'gradle'
-          
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-        
-      - name: Run unit tests
-        run: |
-          echo "Running unit tests..."
-          ./gradlew :lsplant:test :test:testDebugUnitTest
-          
-      - name: Upload test reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: unit-test-reports
-          path: |
-            lsplant/build/reports/tests/
-            test/build/reports/tests/
-          retention-days: 7
-
-  summary:
-    name: Summary
-    runs-on: ubuntu-latest
-    needs: [build, build-test-apk, run-tests]
-    if: always()
-    
-    steps:
-      - name: Print summary
-        run: |
-          echo "=== Build Summary ==="
-          echo "Build job: ${{ needs.build.result }}"
-          echo "Test APK build: ${{ needs.build-test-apk.result }}"
-          echo "Tests run: ${{ needs.run-tests.result }}"
-          echo ""
-          echo "All artifacts are available in the Artifacts section."
+          name: release-apk
+          path: test/build/outputs/apk/release/
