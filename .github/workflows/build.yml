@@ -1,5 +1,5 @@
 
-name: Build APK Only
+name: Build ARM Release Libraries
 
 on:
   push:
@@ -7,8 +7,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-apk:
-    name: Build APK
+  build-arm-release:
+    name: Build ARM64 & ARM7 Release
     runs-on: ubuntu-latest
     
     steps:
@@ -17,62 +17,75 @@ jobs:
         with:
           submodules: 'recursive'
           
-      - name: Setup Java with cache
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
-          cache: 'gradle'
           
-      - name: Setup Android SDK and accept licenses
+      - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         
-      - name: Accept NDK license
+      - name: Accept Android licenses
         run: |
-          echo "Accepting NDK license..."
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;29.0.13599879" --licenses || true
-          
-      - name: Accept all Android licenses
-        run: |
-          echo "Accepting all Android licenses..."
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
           
-      - name: List available projects
+      - name: Clean previous builds
         run: |
-          echo "=== Listing all Gradle projects ==="
-          ./gradlew projects --no-daemon
+          rm -rf lsplant/build
           
-      - name: List available tasks
+      - name: Build ARM64 Release
         run: |
-          echo "=== Listing all assemble tasks ==="
-          ./gradlew tasks --all | grep -i assemble || true
+          echo "Building ARM64 Release library..."
+          ./gradlew :lsplant:assembleArm64-v8aRelease
           
-      - name: Check project structure
+      - name: Build ARM7 Release
         run: |
-          echo "=== Project structure ==="
-          find . -name "build.gradle" -o -name "build.gradle.kts" | sort
+          echo "Building ARM7 Release library..."
+          ./gradlew :lsplant:assembleArmeabi-v7aRelease
+          
+      - name: Show build outputs
+        run: |
+          echo "=== Release Build Outputs ==="
           echo ""
-          echo "=== Settings.gradle content ==="
-          cat settings.gradle 2>/dev/null || cat settings.gradle.kts 2>/dev/null || echo "No settings file found"
+          echo "ARM64 Release files:"
+          find lsplant/build -path "*arm64-v8aRelease*" -name "*.so" -type f 2>/dev/null | while read file; do
+            echo "  - $(basename "$file") ($(ls -lh "$file" | awk '{print $5}'))"
+          done || echo "  No ARM64 files found"
           
-      - name: Try building APK
-        run: |
-          echo "Trying to build APK..."
-          
-          # Pehle lsplant build karein
-          ./gradlew :lsplant:assembleRelease --no-daemon || echo "lsplant:assembleRelease failed"
-          
-          # Ab dekhte hain kya kya build hua
           echo ""
-          echo "=== All built files ==="
-          find . -name "*.apk" -o -name "*.aar" -type f 2>/dev/null || echo "No APK/AAR files found"
+          echo "ARM7 Release files:"
+          find lsplant/build -path "*armeabi-v7aRelease*" -name "*.so" -type f 2>/dev/null | while read file; do
+            echo "  - $(basename "$file") ($(ls -lh "$file" | awk '{print $5}'))"
+          done || echo "  No ARM7 files found"
           
-      - name: Upload any built files
-        if: always()
+          echo ""
+          echo "AAR files:"
+          find lsplant/build -name "*.aar" -type f 2>/dev/null | while read file; do
+            echo "  - $(basename "$file") ($(ls -lh "$file" | awk '{print $5}'))"
+          done || echo "  No AAR files found"
+          
+      - name: Upload ARM64 Release libraries
         uses: actions/upload-artifact@v4
         with:
-          name: built-artifacts
+          name: arm64-release
           path: |
-            **/*.apk
-            **/*.aar
+            lsplant/build/intermediates/cmake/arm64-v8aRelease/obj/
+            lsplant/build/intermediates/stripped_native_libs/arm64-v8aRelease/out/lib/
           if-no-files-found: warn
+          
+      - name: Upload ARM7 Release libraries
+        uses: actions/upload-artifact@v4
+        with:
+          name: arm7-release
+          path: |
+            lsplant/build/intermediates/cmake/armeabi-v7aRelease/obj/
+            lsplant/build/intermediates/stripped_native_libs/armeabi-v7aRelease/out/lib/
+          if-no-files-found: warn
+          
+      - name: Upload Release AAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-aar
+          path: lsplant/build/outputs/aar/
+          if-no-files-found: ignore
